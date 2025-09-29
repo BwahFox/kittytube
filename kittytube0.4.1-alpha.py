@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# KittyTube — yt-dlp + Tkinter GUI
-# Features: adjustable search limit, choose download folder, Download/Stream/Both, simple theming with persistent config.
+# KittyTube — Basic frontend for yt-dlp
+# Note: This software was generated using ChatGPT. It should work just fine, but please keep in mind that it isn't intended to be used for anything critical. BwahFox just wanted a way to search and watch youtube while freetube isn't working. 
 import sys, os, json, shutil, subprocess, threading, time
 from pathlib import Path
 import tkinter as tk
