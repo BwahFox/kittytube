@@ -36,13 +36,29 @@ def hms(x):
     m, s = divmod(int(x), 60); h, m = divmod(m, 60)
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
+# --- FAST SEARCH: flat listing (no per-video metadata fetch) ---
 def yts(q, n=20):
-    with YoutubeDL({"quiet": True, "no_warnings": True, "noplaylist": True}) as y:
-        i = y.extract_info(f"ytsearch{n}:{q}", download=False)
-    return i.get("entries", []) if i else []
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "extract_flat": True,  # key speedup
+        # "default_search": "ytsearch",  # optional; implicit via ytsearch{n}:q
+    }
+    with YoutubeDL(opts) as y:
+        info = y.extract_info(f"ytsearch{n}:{q}", download=False)
+    return info.get("entries", []) if info else []
+
+def entry_page_url(e):
+    """Return a safe YouTube page URL for an entry (flat or full)."""
+    url = e.get("webpage_url") or e.get("url")
+    if url and url.startswith(("http://", "https://")):
+        return url
+    vid = e.get("id") or url
+    return f"https://www.youtube.com/watch?v={vid}" if vid else None
 
 def prog_url(page_url):
-    # Progressive (audio+video) for ffplay fallback
+    # Progressive (audio+video in one) for ffplay fallback
     opts = {"quiet": True, "no_warnings": True, "noplaylist": True,
             "format": "best[acodec!=none][vcodec!=none]/best"}
     with YoutubeDL(opts) as y:
@@ -99,7 +115,7 @@ class App(tk.Tk):
         except Exception:
             pass
 
-        # Load theme from user config (persistent across runs)
+        # Load theme (persistent)
         self._load_theme()
 
         self._ui()
@@ -108,18 +124,16 @@ class App(tk.Tk):
     # ---------- Theme persistence ----------
     def _load_theme(self):
         try:
-            # Backward-compat: if a theme file sits next to the script/exe, import it once.
+            # Import legacy side-by-side theme once
             sibling = Path(__file__).with_name("kittytube_theme.json")
             if not THEME_PATH.exists() and sibling.exists():
                 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
                 THEME_PATH.write_text(sibling.read_text(encoding="utf-8"), encoding="utf-8")
-
             if THEME_PATH.exists():
                 data = json.loads(THEME_PATH.read_text(encoding="utf-8"))
                 self.bg = data.get("bg", self.bg)
                 self.fg = data.get("fg", self.fg)
         except Exception:
-            # Fail silently to safe defaults
             pass
 
     def _save_theme(self):
@@ -134,7 +148,6 @@ class App(tk.Tk):
     def _apply_theme(self):
         bg, fg = self.bg, self.fg
         self.config(bg=bg)
-
         s = self._style
         s.configure(".", background=bg, foreground=fg)
         s.configure("TFrame", background=bg)
@@ -143,8 +156,7 @@ class App(tk.Tk):
         s.configure("TSeparator", background=bg)
         s.configure("TEntry", fieldbackground=bg, foreground=fg)
         s.map("TButton", background=[("active", bg)])
-
-        # Classic widgets that don’t inherit ttk styles
+        # Classic widgets
         sel_bg = "#3a86ff"; sel_fg = "#ffffff"
         self.lb.config(bg=bg, fg=fg, highlightbackground=bg,
                        selectbackground=sel_bg, selectforeground=sel_fg)
@@ -250,7 +262,8 @@ class App(tk.Tk):
                     for e in res:
                         t = e.get("title") or "(no title)"
                         ch = (e.get("uploader") or e.get("channel")) or "Unknown"
-                        self.lb.insert("end", f"{t}  [{hms(e.get('duration'))}] — {ch}")
+                        dur = e.get("duration")  # may be missing in flat search
+                        self.lb.insert("end", f"{t}  [{hms(dur)}] — {ch}")
                     self.log.set(f"Found {len(res)} result(s).")
                 self.set_busy(False)
             self.after(0, ui)
@@ -259,7 +272,7 @@ class App(tk.Tk):
     def do_stream(self):
         ent = self.sel()
         if not ent: return
-        page = ent.get("webpage_url") or ent.get("url")
+        page = entry_page_url(ent)
         if not page: self.log.set("No URL."); return
         def work():
             self.set_busy(True)
@@ -283,7 +296,7 @@ class App(tk.Tk):
         threading.Thread(target=work, daemon=True).start()
 
     def _download(self, ent, then_play=False):
-        page = ent.get("webpage_url") or ent.get("url")
+        page = entry_page_url(ent)
         if not page: self.log.set("No URL."); return
         def cb(d):
             s = d.get("status")
